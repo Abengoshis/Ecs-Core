@@ -83,9 +83,14 @@ namespace EcsCore
             }
         }
 
-        public int CreateEntity(Vector2 transform, float rotation = 0f, int parentEntity = 0)
+        public int CreateEntity(Vector2 position, float rotation = 0f, int parentEntity = 0)
         {
-            return CreateEntity(transform.X, transform.Y, rotation, parentEntity);
+            return CreateEntity(position.X, position.Y, rotation, parentEntity);
+        }
+
+        public int CreateEntity(Transform transform, int parentEntity = 0)
+        {
+            return CreateEntity(transform.Position, transform.Rotation, parentEntity);
         }
 
         public int CreateEntity(int parentEntity = 0)
