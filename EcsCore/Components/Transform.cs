@@ -5,7 +5,10 @@ namespace EcsCore.Components
 {
     public class Transform : IEcsComponent
     {
+        [ContentSerializer(Optional = true)]
         public Vector2 Position;
+
+        [ContentSerializer(Optional = true)]
         public float Rotation;
 
         [ContentSerializerIgnore]

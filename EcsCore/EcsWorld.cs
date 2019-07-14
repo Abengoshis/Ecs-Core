@@ -56,10 +56,10 @@ namespace EcsCore
             RegisterDrawSystem(new TransformSystem(this));
 
             // Create the root entity.
-            CreateEntity(0, 0, 0);
+            CreateEntity();
         }
 
-        public int CreateEntity(float x = 0f, float y = 0f, float rotation = 0f, int parentEntity = 0)
+        public int CreateEntity(float x, float y, float rotation = 0f, int parentEntity = 0)
         {
             if (!IsAtEntityCapacity)
             {
@@ -86,6 +86,11 @@ namespace EcsCore
         public int CreateEntity(Vector2 transform, float rotation = 0f, int parentEntity = 0)
         {
             return CreateEntity(transform.X, transform.Y, rotation, parentEntity);
+        }
+
+        public int CreateEntity(int parentEntity = 0)
+        {
+            return CreateEntity(0, 0, 0, parentEntity);
         }
 
         public void DestroyEntity(int entity)
