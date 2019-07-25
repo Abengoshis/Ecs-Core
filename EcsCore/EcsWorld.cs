@@ -9,7 +9,8 @@ namespace EcsCore
 {
     public class EcsWorld
     {
-        public const int INVALID_ENTITY = -1;
+        public const int ROOT_ENTITY = 0;
+        public const int NO_ENTITY = -1;
 
         public readonly int EntityCapacity;
         public int EntityCount { get; private set; }
@@ -18,7 +19,7 @@ namespace EcsCore
             get { return EntityCount == EntityCapacity; }
         }
 
-        private int[] entities; //Entity ids. Dynamic loose hierarchy order.
+        private int[] entities; // Entity ids. Dynamic loose hierarchy order.
         private int[] indices; // Indices of each entity to avoid linear searches. Fixed entity index order.
         private int[] parents; // Parents of each entity. Fixed entity index order.
         private IDictionary<Type, IDictionary<int, IEcsComponent>> components; // Component types for each entity. TODO: Dictionary of fixed size arrays of components, where components are structs rather than classes and never null, just reused.
@@ -30,8 +31,8 @@ namespace EcsCore
         public event ComponentEventHandler OnComponentRemoved;
 
         public delegate void EntityEventHandler(int entity);
-        public EntityEventHandler OnEntityCreated;
-        public EntityEventHandler OnEntityDestroyed;
+        public event EntityEventHandler OnEntityCreated;
+        public event EntityEventHandler OnEntityDestroyed;
 
         public EcsWorld(int entityCapacity)
         {
@@ -45,7 +46,7 @@ namespace EcsCore
             {
                 entities[i] = i;
                 indices[i] = i;
-                parents[i] = 0;
+                parents[i] = ROOT_ENTITY;
             }
             components = new Dictionary<Type, IDictionary<int, IEcsComponent>>();
             updateSystems = new List<IEcsSystem>();
@@ -55,11 +56,11 @@ namespace EcsCore
             RegisterComponentType<Transform>();
             RegisterDrawSystem(new TransformSystem(this));
 
-            // Create the root entity.
-            CreateEntity();
+            // Create the root entity, not parented to anything.
+            CreateEntity(NO_ENTITY);
         }
 
-        public int CreateEntity(float x, float y, float rotation = 0f, int parentEntity = 0)
+        public int CreateEntity(float x, float y, float rotation = 0f, int parentEntity = ROOT_ENTITY)
         {
             if (!IsAtEntityCapacity)
             {
@@ -68,7 +69,7 @@ namespace EcsCore
                 // All entities should have a transform by default. Anything that doesn't need a transform is better suited to being a separate process or system.
                 AddComponent(entity, new Transform(x, y, rotation));
 
-                SetParent(entity, parentEntity);
+                Parent(entity, parentEntity);
 
                 Console.WriteLine("Created " + entity);
 
@@ -79,28 +80,28 @@ namespace EcsCore
             else
             {
                 Console.WriteLine("The number of entities is already at capacity " + EntityCount + " / " + EntityCapacity);
-                return INVALID_ENTITY;
+                return NO_ENTITY;
             }
         }
 
-        public int CreateEntity(Vector2 position, float rotation = 0f, int parentEntity = 0)
+        public int CreateEntity(Vector2 position, float rotation = 0f, int parentEntity = ROOT_ENTITY)
         {
             return CreateEntity(position.X, position.Y, rotation, parentEntity);
         }
 
-        public int CreateEntity(Transform transform, int parentEntity = 0)
+        public int CreateEntity(Transform transform, int parentEntity = ROOT_ENTITY)
         {
             return CreateEntity(transform.Position, transform.Rotation, parentEntity);
         }
 
-        public int CreateEntity(int parentEntity = 0)
+        public int CreateEntity(int parentEntity = ROOT_ENTITY)
         {
             return CreateEntity(0, 0, 0, parentEntity);
         }
 
         public void DestroyEntity(int entity)
         {
-            var index = indices[entity];
+            var index = GetEntityIndex(entity);
             if (index >= EntityCount)
             {
                 throw new MissingEntityException("Entity " + entity + " has already been destroyed");
@@ -127,7 +128,7 @@ namespace EcsCore
             }
 
             // Clear this entity's parent to the root.
-            parents[entity] = 0;
+            parents[entity] = ROOT_ENTITY;
 
             // Shift the entities after this entity back and place this entity directly after them.
             --EntityCount;
@@ -156,9 +157,16 @@ namespace EcsCore
             return GetEntities(typeof(TComponent));
         }
 
-        internal int GetEntityIndex(int entity)
+        private int GetEntityIndex(int entity)
         {
-            return indices[entity];
+            if (entity >= ROOT_ENTITY)
+            {
+                return indices[entity];
+            }
+            else
+            {
+                return NO_ENTITY;
+            }
         }
 
         private void SetEntityIndex(int entity, int index)
@@ -172,40 +180,73 @@ namespace EcsCore
             return parents[entity];
         }
 
-        public void SetParent(int entity, int parentEntity)
+        public bool TryGetParent(int entity, out int parentEntity)
         {
-            if (parents[entity] == parentEntity)
-            {
-                return;
-            }
+            parentEntity = GetParent(entity);
+            return parentEntity != NO_ENTITY;
+        }
 
-            var index = indices[entity];
-            if (index >= EntityCount)
+        public bool HasParent(int entity)
+        {
+            return parents[entity] != NO_ENTITY;
+        }
+
+        public void Parent(int entity, int parentEntity)
+        {
+            var index = GetEntityIndex(entity);
+            if (index == NO_ENTITY || index >= EntityCount)
             {
                 throw new MissingEntityException("Can't set the parent of the non-existent entity " + entity);
             }
 
-            var parentIndex = indices[parentEntity];
-            if (parentIndex >= EntityCount)
+            if (parentEntity >= ROOT_ENTITY)
             {
-                throw new MissingEntityException("Can't set the parent of entity " + entity + " to the non-existent entity " + parentEntity);
-            }
-
-            // Check that the parent is not a descendant of this entity.
-            var grandparentEntity = GetParent(parentEntity);
-            while (grandparentEntity != 0)
-            {
-                if (grandparentEntity == entity)
+                var parentIndex = GetEntityIndex(parentEntity);
+                if (parentIndex >= EntityCount)
                 {
-                    throw new GrandfatherParadoxException("Can't set the parent of entity " + entity + " to entity" + parentEntity + " because it would cause a circular relationship.");
+                    throw new MissingEntityException("Can't set the parent of entity " + entity + " to the non-existent entity " + parentEntity);
                 }
-                grandparentEntity = GetParent(grandparentEntity);
+
+                if (entity == parentEntity)
+                {
+                    throw new GrandfatherParadoxException("Can't set the parent of entity " + entity + " to itself.");
+                }
+
+                if (parents[entity] == parentEntity)
+                {
+                    return;
+                }
+
+                // Check that the parent is not a descendant of this entity.
+                var grandparentEntity = GetParent(parentEntity);
+                while (grandparentEntity > ROOT_ENTITY)
+                {
+                    if (grandparentEntity == entity)
+                    {
+                        throw new GrandfatherParadoxException("Can't set the parent of entity " + entity + " to entity" + parentEntity + " because it would cause a circular relationship.");
+                    }
+                    grandparentEntity = GetParent(grandparentEntity);
+                }
+
+                parents[entity] = parentEntity;
+
+                // Make sure entities are in a valid order for the hierarchy.
+                QuickSortEntities(Math.Min(index, parentIndex), EntityCount); // TODO: Something more efficient...
             }
+            else
+            {
+                parents[entity] = NO_ENTITY;
+            }
+        }
 
-            parents[entity] = parentEntity;
+        public void ParentToRoot(int entity)
+        {
+            Parent(entity, ROOT_ENTITY);
+        }
 
-            // Make sure entities are in a valid order for the hierarchy.
-            QuickSortEntities(Math.Min(index, parentIndex), EntityCount); // TODO: Something more efficient...
+        public void Unparent(int entity)
+        {
+            Parent(entity, NO_ENTITY);
         }
 
         private void QuickSortEntities(int leftIndex, int rightIndex)
@@ -219,7 +260,6 @@ namespace EcsCore
 
             QuickSortEntities(leftIndex, pivotIndex);
             QuickSortEntities(pivotIndex + 1, rightIndex);
-
         }
 
         private int PartitionEntities(int leftIndex, int rightIndex)

@@ -18,14 +18,21 @@ namespace EcsCore.Systems
         {
             var transform = components.Transform;
 
-            var parentEntity = world.GetParent(entity);
-            var parentTransform = world.GetComponent<Transform>(parentEntity);
-
-            // Calculate the global pose from the local position and rotation, and the parent's global pose.
             var translation = Matrix.CreateTranslation(transform.Position.X, transform.Position.Y, 0);
             var rotation = Matrix.CreateRotationZ(transform.Rotation);
             Matrix.Multiply(ref rotation, ref translation, out transform.LocalPose);
-            Matrix.Multiply(ref transform.LocalPose, ref parentTransform.GlobalPose, out transform.GlobalPose);
+
+            int parentEntity;
+            if (world.TryGetParent(entity, out parentEntity))
+            {
+                // Calculate the global pose from the local position and rotation, and the parent's global pose.
+                var parentTransform = world.GetComponent<Transform>(parentEntity);
+                Matrix.Multiply(ref transform.LocalPose, ref parentTransform.GlobalPose, out transform.GlobalPose);
+            }
+            else
+            {
+                transform.GlobalPose = transform.LocalPose;
+            }
         }
     }
 }
